@@ -1,0 +1,837 @@
+I would build it in **10 phases**, but importantly, don't start with downloads, offline mode, or recommendation AI. Those are the shiny toys. First make the boring core extremely solid.
+
+Your end goal is:
+
+```text
+Spotify-like PWA
+        │
+        ├── Search
+        ├── Streaming
+        ├── Library
+        ├── Playlists
+        ├── Player
+        ├── Downloads
+        ├── Offline mode
+        └── Recommendations
+              │
+        Cloudflare + R2
+              │
+         PostgreSQL
+```
+
+## Phase 0: Define the rules of the catalog
+
+Before writing code, decide exactly **where the music comes from**.
+
+For your public version, I'd structure the ingestion system so that it accepts music you're authorized to host, such as music uploaded by participating artists or content whose license permits redistribution.
+
+Create a simple concept:
+
+```text
+Track
+ ├── title
+ ├── artist
+ ├── album
+ ├── audio
+ ├── artwork
+ ├── streaming_allowed
+ ├── download_allowed
+ └── license
+```
+
+This is important because later your player, download system, and API can all enforce those permissions.
+
+**Deliverable:** one sample album and ~20 tracks available in your system.
+
+---
+
+# Phase 1: Project foundation
+
+Set up the actual application.
+
+### Stack
+
+```text
+Next.js
+TypeScript
+Tailwind
+shadcn/ui
+Supabase Auth
+PostgreSQL
+Cloudflare R2
+Cloudflare CDN
+```
+
+Project structure:
+
+```text
+music-app/
+├── app/
+│   ├── page.tsx
+│   ├── search/
+│   ├── album/
+│   ├── artist/
+│   ├── playlist/
+│   ├── library/
+│   └── login/
+│
+├── components/
+│   ├── player/
+│   ├── album/
+│   ├── playlist/
+│   └── layout/
+│
+├── lib/
+│   ├── db/
+│   ├── auth/
+│   ├── r2/
+│   └── audio/
+│
+└── public/
+```
+
+Also establish:
+
+```text
+ESLint
+Prettier
+Git
+environment variables
+database migrations
+```
+
+**Deliverable:** application boots, authentication works, database connects.
+
+---
+
+# Phase 2: Database + catalog
+
+Build the data model before worrying about pretty gradients.
+
+I'd start with:
+
+```text
+users
+artists
+albums
+tracks
+playlists
+playlist_tracks
+likes
+listening_history
+```
+
+Relationships:
+
+```text
+Artist
+  │
+  └── Albums
+        │
+        └── Tracks
+
+User
+ ├── Playlists
+ ├── Likes
+ └── Listening History
+```
+
+A track might look like:
+
+```json
+{
+  "id": "...",
+  "title": "Example",
+  "artist_id": "...",
+  "album_id": "...",
+  "duration": 242,
+  "audio_path": "audio/...",
+  "artwork_path": "...",
+  "bitrate": 128
+}
+```
+
+**Deliverable:** you can create artists, albums and tracks entirely through your backend.
+
+---
+
+# Phase 3: Music ingestion
+
+This is your first genuinely important backend subsystem.
+
+Build:
+
+```text
+Upload
+  ↓
+Validate
+  ↓
+Extract metadata
+  ↓
+Generate/validate artwork
+  ↓
+Store audio in R2
+  ↓
+Store metadata in PostgreSQL
+```
+
+Example:
+
+```text
+Upload track
+      ↓
+R2:
+audio/artist-id/album-id/track-id.opus
+
+Postgres:
+track metadata
+```
+
+You should also calculate a content hash:
+
+```text
+SHA-256
+```
+
+This lets you detect duplicate files later.
+
+Example:
+
+```text
+track A
+SHA256 = ABC123
+
+track B
+SHA256 = ABC123
+
+→ same underlying file
+```
+
+That can save considerable storage.
+
+**Deliverable:** artist/admin can upload music and it appears in the catalog.
+
+---
+
+# Phase 4: The actual Spotify-like UI
+
+Now make it beautiful.
+
+Build:
+
+### Home
+
+```text
+Good evening
+
+Recently played
+
+Made for you
+
+Trending
+
+New releases
+```
+
+### Search
+
+```text
+Search
+ ├── Songs
+ ├── Artists
+ ├── Albums
+ └── Playlists
+```
+
+### Artist page
+
+```text
+Artist
+
+Popular
+Albums
+Singles
+```
+
+### Album
+
+```text
+Artwork
+Album title
+Artist
+
+01 Song
+02 Song
+03 Song
+...
+```
+
+### Library
+
+```text
+Liked Songs
+Playlists
+Albums
+Artists
+Downloads
+```
+
+**Deliverable:** user can navigate the entire application without touching an API manually.
+
+---
+
+# Phase 5: Build the audio player
+
+This should be treated as its own subsystem.
+
+Don't scatter audio logic across React components.
+
+Create something like:
+
+```text
+AudioEngine
+```
+
+Responsibilities:
+
+```text
+play()
+pause()
+seek()
+next()
+previous()
+setVolume()
+shuffle()
+repeat()
+loadTrack()
+```
+
+State:
+
+```typescript
+interface PlayerState {
+    currentTrack: Track | null;
+    playing: boolean;
+    currentTime: number;
+    duration: number;
+    volume: number;
+    queue: Track[];
+    queueIndex: number;
+    shuffle: boolean;
+    repeat: "off" | "track" | "queue";
+}
+```
+
+Then integrate:
+
+```text
+HTMLAudioElement
+        +
+Media Session API
+        +
+Player state
+```
+
+The Media Session API lets your application integrate with system media controls where supported.
+
+**Deliverable:** you can use the app like an actual music player, including queue/seek/skip/shuffle/repeat.
+
+---
+
+# Phase 6: CDN + R2 streaming architecture
+
+Now implement the part we discussed.
+
+The flow should become:
+
+```text
+Browser
+   │
+   │ request metadata
+   ▼
+Next.js API
+   │
+   │ authorize
+   ▼
+signed CDN URL
+   │
+   ▼
+Cloudflare CDN
+   │
+   ├── HIT → Browser
+   │
+   └── MISS
+          ↓
+         R2
+```
+
+Your Next.js server should **not proxy the audio**.
+
+Test:
+
+```text
+10 simultaneous users
+      ↓
+same song
+      ↓
+CDN cache
+```
+
+and inspect:
+
+```text
+cache hit ratio
+origin requests
+response latency
+```
+
+**Deliverable:** audio plays through the CDN, with your API completely out of the audio data path.
+
+---
+
+# Phase 7: Downloads
+
+Now introduce downloads.
+
+UI:
+
+```text
+Song
+[ ⋮ ]
+
+Play
+Add to playlist
+Like
+Download
+```
+
+Download flow:
+
+```text
+Click Download
+      ↓
+API authorization
+      ↓
+signed CDN URL
+      ↓
+browser fetch()
+      ↓
+local storage
+```
+
+Create:
+
+```text
+download manager
+```
+
+with states:
+
+```text
+queued
+downloading
+complete
+failed
+paused
+```
+
+Then show:
+
+```text
+Downloads
+──────────────────
+✓ Song 1
+✓ Song 2
+↓ Song 3 72%
+✕ Song 4
+```
+
+**Deliverable:** users can download permitted tracks and see download progress.
+
+---
+
+# Phase 8: Offline PWA
+
+This is where your original idea becomes special.
+
+Turn the site into a proper PWA.
+
+Implement:
+
+```text
+Service Worker
+     │
+     ├── App shell
+     ├── CSS
+     ├── JS
+     └── static assets
+```
+
+and:
+
+```text
+IndexedDB
+     │
+     ├── tracks
+     ├── artwork
+     ├── metadata
+     └── playlists
+```
+
+Offline flow:
+
+```text
+                 INTERNET
+                    │
+                    ▼
+             Download Manager
+                    │
+                    ▼
+                IndexedDB
+                    │
+              ┌─────┴─────┐
+              │           │
+           ONLINE       OFFLINE
+              │           │
+             CDN      IndexedDB
+              │           │
+              └─────┬─────┘
+                    ↓
+                 Player
+```
+
+Test the actual nightmare scenario:
+
+```text
+User downloads 20 tracks
+↓
+turns Wi-Fi off
+↓
+opens app
+↓
+starts music
+↓
+navigates between screens
+↓
+changes playlists
+```
+
+Don't call it "offline support" until you've actually done this test. Humans have a remarkable talent for declaring things finished prematurely.
+
+**Deliverable:** installed PWA works without an Internet connection for downloaded content.
+
+---
+
+# Phase 9: Performance + cost optimization
+
+Now you optimize the infrastructure.
+
+Measure:
+
+```text
+CDN cache hit ratio
+Audio bandwidth
+R2 storage
+API requests
+Database queries
+Average startup time
+Time to first audio
+Offline storage usage
+```
+
+Then optimize:
+
+### Audio
+
+```text
+128 kbps
+256 kbps
+```
+
+### Images
+
+```text
+WebP / AVIF
+```
+
+### CDN
+
+```text
+long cache TTL
+immutable URLs
+range requests
+```
+
+### Application
+
+```text
+lazy loading
+pagination
+image optimization
+virtualized lists
+```
+
+### Database
+
+Add indexes:
+
+```sql
+CREATE INDEX idx_tracks_artist
+ON tracks(artist_id);
+
+CREATE INDEX idx_tracks_album
+ON tracks(album_id);
+
+CREATE INDEX idx_history_user
+ON listening_history(user_id);
+```
+
+**Deliverable:** the app remains fast while your infrastructure usage stays predictable.
+
+---
+
+# Phase 10: Recommendations
+
+Only after everything above works.
+
+Don't immediately build some "AI-powered neural recommendation engine" because the word AI makes hackathon judges briefly sparkle.
+
+Start simple.
+
+Collect:
+
+```text
+plays
+skips
+likes
+replays
+searches
+playlist additions
+```
+
+Then use:
+
+```text
+Most listened artists
+Most listened genres
+Recently played
+Similar artists
+Popular tracks
+```
+
+Then collaborative filtering:
+
+```text
+User A likes:
+Song X
+Song Y
+Song Z
+
+User B likes:
+Song X
+Song Y
+
+→ recommend Song Z
+```
+
+Later you can add embeddings/vector search.
+
+**Deliverable:** personalized home page.
+
+---
+
+# Your MVP should actually stop around Phase 8
+
+I'd define:
+
+## MVP
+
+```text
+Phase 0
+Catalog/legal model
+
+Phase 1
+Foundation
+
+Phase 2
+Database
+
+Phase 3
+Ingestion
+
+Phase 4
+UI
+
+Phase 5
+Player
+
+Phase 6
+CDN/R2
+
+Phase 7
+Downloads
+
+Phase 8
+Offline PWA
+```
+
+At that point you already have:
+
+```text
+✅ Spotify-like interface
+✅ Accounts
+✅ Search
+✅ Albums
+✅ Artists
+✅ Playlists
+✅ Streaming
+✅ Queue
+✅ Shuffle
+✅ Repeat
+✅ Downloads
+✅ Offline playback
+✅ CDN
+✅ Object storage
+✅ Cost-efficient media delivery
+```
+
+That's already an **excellent portfolio project**.
+
+---
+
+# Phase 11, later: serious production features
+
+Once the MVP works:
+
+```text
+        ┌──────────────────────┐
+        │      Production      │
+        └──────────┬───────────┘
+                   │
+       ┌───────────┼────────────┐
+       ↓           ↓            ↓
+ Recommendations  Analytics   Moderation
+       │           │            │
+       ↓           ↓            ↓
+   Discovery     Metrics      Reports
+```
+
+Add:
+
+```text
+artist dashboards
+content moderation
+copyright reporting
+analytics
+search ranking
+recommendation engine
+lyrics integration where properly licensed
+social features
+public playlists
+following
+artist verification
+upload transcoding
+multi-quality audio
+```
+
+---
+
+# The development order I'd personally use
+
+If you are building this alone, this sequence is much more realistic:
+
+```text
+WEEK 1
+├── Next.js setup
+├── Auth
+├── DB schema
+└── Basic UI
+
+WEEK 2
+├── Artists
+├── Albums
+├── Tracks
+└── Catalog management
+
+WEEK 3
+├── Search
+├── Home
+├── Artist page
+└── Album page
+
+WEEK 4
+├── Audio engine
+├── Queue
+├── Shuffle
+├── Repeat
+└── Media controls
+
+WEEK 5
+├── R2
+├── CDN
+├── Signed URLs
+└── Streaming optimization
+
+WEEK 6
+├── Download manager
+├── IndexedDB
+└── Download UI
+
+WEEK 7
+├── Service Worker
+├── Offline app shell
+└── Offline playback
+
+WEEK 8
+├── Performance
+├── Security
+├── Analytics
+└── Deployment
+```
+
+Treat those as rough **engineering milestones**, not promises that your code will obey the calendar. Code rarely respects calendars. It prefers suffering.
+
+## One architectural principle I'd lock in from day one
+
+Keep these three things completely separate:
+
+```text
+                MUSIC DATA
+
+             ┌──────────────┐
+             │ PostgreSQL   │
+             │              │
+             │ metadata     │
+             └──────┬───────┘
+                    │
+                    │
+             ┌──────▼───────┐
+             │     R2       │
+             │              │
+             │ audio files  │
+             └──────┬───────┘
+                    │
+                    ▼
+             ┌──────────────┐
+             │ Cloudflare   │
+             │ CDN          │
+             └──────┬───────┘
+                    │
+                    ▼
+                 Browser
+                    │
+             ┌──────▼───────┐
+             │ IndexedDB    │
+             │              │
+             │ offline copy │
+             └──────────────┘
+```
+
+**PostgreSQL = what the music is.**  
+**R2 = where the canonical music file lives.**  
+**Cloudflare = how users receive it.**  
+**IndexedDB = what the user keeps offline.**
+
+That separation will save you a ridiculous amount of pain later.
+
+For your particular project, I'd begin with **Phase 1 + Phase 2 together**, get the database and application skeleton correct, then build the player before touching the offline system. The player becomes the foundation that both streaming and offline playback use.
