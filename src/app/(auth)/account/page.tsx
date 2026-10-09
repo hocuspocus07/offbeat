@@ -1,11 +1,24 @@
-import { createClient } from "@/lib/supabase/server";
-import { connection } from "next/server";
+
+import { Suspense } from "react";
 import { redirect } from "next/navigation";
+import { createClient } from "@/lib/supabase/server";
 import { signOut } from "@/app/actions/auth";
 
-export default async function AccountPage() {
-  await connection();
+export default function AccountPage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="min-h-screen bg-background p-8 text-foreground">
+          Loading your account...
+        </main>
+      }
+    >
+      <AccountContent />
+    </Suspense>
+  );
+}
 
+async function AccountContent() {
   const supabase = await createClient();
   const { data, error } = await supabase.auth.getClaims();
 
@@ -16,24 +29,23 @@ export default async function AccountPage() {
   const email = data.claims.email;
 
   return (
-    <main className="min-h-screen bg-zinc-950 p-8 text-white">
-      <div className="mx-auto max-w-3xl space-y-6">
-        <h1 className="text-3xl font-bold">Your Offbeat account</h1>
+    <main className="min-h-screen bg-background p-8 text-foreground">
+      <h1 className="font-display text-3xl font-bold">
+        Your Offbeat Account
+      </h1>
 
-        <section className="rounded-xl border border-zinc-800 bg-zinc-900 p-6">
-          <p className="text-sm text-zinc-400">Signed in as</p>
-          <p className="mt-2 text-lg">{email}</p>
-        </section>
+      <p className="mt-3 text-muted-foreground">
+        Signed in as {email}
+      </p>
 
-        <form action={signOut}>
-          <button
-            type="submit"
-            className="rounded-lg border border-zinc-700 px-5 py-3 hover:bg-zinc-800"
-          >
-            Log out
-          </button>
-        </form>
-      </div>
+      <form action={signOut} className="mt-6">
+        <button
+          type="submit"
+          className="rounded-full bg-primary px-5 py-2 font-semibold text-primary-foreground transition-opacity hover:opacity-90"
+        >
+          Sign out
+        </button>
+      </form>
     </main>
   );
 }
