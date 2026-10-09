@@ -16,8 +16,7 @@ export async function updateSession(request: NextRequest) {
       getAll() {
         return request.cookies.getAll();
       },
-
-      setAll(cookiesToSet, headers) {
+      setAll(cookiesToSet) {
         cookiesToSet.forEach(({ name, value }) => {
           request.cookies.set(name, value);
         });
@@ -27,15 +26,10 @@ export async function updateSession(request: NextRequest) {
         cookiesToSet.forEach(({ name, value, options }) => {
           response.cookies.set(name, value, options);
         });
-
-        Object.entries(headers).forEach(([name, value]) => {
-          response.headers.set(name, value);
-        });
       },
     },
   });
 
-  // Refresh and verify the current authentication claims.
   await supabase.auth.getClaims();
 
   return response;
