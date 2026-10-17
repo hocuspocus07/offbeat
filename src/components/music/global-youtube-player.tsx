@@ -5,7 +5,22 @@ import { Check, Heart, ListMusic, Maximize, Pause, Play, Repeat2, Shuffle, SkipB
 import { useMusicPlayer } from "@/components/music/music-player-provider";
 
 export default function GlobalYouTubePlayer() {
-  const { currentTrack, isPlaying, togglePlayback, volume, setVolume } = useMusicPlayer();
+  const {
+    currentTrack,
+    isPlaying,
+    togglePlayback,
+    volume,
+    setVolume,
+    currentTime,
+    duration,
+    seekTo,
+  } = useMusicPlayer();
+  const progress = duration > 0 ? Math.min(100, (currentTime / duration) * 100) : 0;
+
+  function formatTime(seconds: number) {
+    if (!Number.isFinite(seconds) || seconds < 0) return "0:00";
+    return `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, "0")}`;
+  }
 
   return (
     <footer className="fixed inset-x-0 bottom-0 z-50 h-[76px] border-t border-[#252525] bg-[#050505] px-3 sm:px-5">
@@ -45,8 +60,24 @@ export default function GlobalYouTubePlayer() {
             <button aria-label="Next track" disabled className="text-[#777]"><SkipForward size={18} fill="currentColor" /></button>
             <button aria-label="Repeat" disabled className="hidden text-[#777] sm:block"><Repeat2 size={17} /></button>
           </div>
-          <div className="flex w-full items-center justify-center gap-2 text-[10px] text-[#aaa]">
-            <span>{currentTrack ? "YouTube" : "Ready when you are"}</span>
+          <div className="flex w-full min-w-0 items-center gap-2 text-[10px] tabular-nums text-[#aaa]">
+            <span className="w-9 shrink-0 text-right">{formatTime(currentTime)}</span>
+            <input
+              type="range"
+              min={0}
+              max={Math.max(duration, 1)}
+              step={1}
+              value={Math.min(currentTime, Math.max(duration, 1))}
+              disabled={!currentTrack || duration <= 0}
+              aria-label="Seek through track"
+              aria-valuetext={`${formatTime(currentTime)} of ${formatTime(duration)}`}
+              onChange={(event) => seekTo(Number(event.currentTarget.value))}
+              style={{
+                background: `linear-gradient(to right, #ffffff ${progress}%, #4d4d4d ${progress}%)`,
+              }}
+              className="h-1 min-w-0 flex-1 cursor-pointer appearance-none rounded-full hover:accent-[#1ed760] disabled:cursor-not-allowed disabled:opacity-70"
+            />
+            <span className="w-9 shrink-0">{formatTime(duration)}</span>
           </div>
         </div>
 
